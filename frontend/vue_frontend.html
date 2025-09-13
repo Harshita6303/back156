@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Policy Manager + Assistant</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- Axios -->
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.7/dist/axios.min.js"></script>
+  <style>
+    /* Simple modal styling (for edit) */
+    .modal { background: rgba(0,0,0,.35); }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div id="app" class="max-w-6xl mx-auto px-4 py-6">
+    <header class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
+      <div>
+        <h1 class="text-2xl font-bold">Policy Manager & Assistant</h1>
+        <p class="text-sm text-gray-500">CRUD for policies + AI assistant (chat & search)</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-sm text-gray-600">API Base</label>
+        <input v-model="apiBase" class="border rounded-lg px-3 py-2 text-sm w-[380px]" />
+      </div>
+    </header>
+
+    <!-- Tabs -->
+    <div class="mb-4 flex gap-2">
+      <button @click="tab='policies'" :class="tabBtn('policies')">Policies</button>
+      <button @click="tab='assistantChat'" :class="tabBtn('assistantChat')">Assistant: Chat</button>
+      <button @click="tab='assistantSearch'" :class="tabBtn('assistantSearch')">Assistant: Search</button>
+    </div>
+
+    <!-- Notifications -->
+    <transition name="fade">
+      <div v-if="toast.show" class="mb-4 p-3 rounded-lg" :class="toast.ok ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-800'">
+        {{ toast.msg }}
+      </div>
+    </transition>
+
+    <!-- POLICIES TAB -->
+    <section v-show="tab==='policies'" class="space-y-6">
+      <!-- Create -->
+      <div class="bg-white rounded-2xl shadow p-5">
+        <h2 class="text-lg font-semibold mb-4">Create Policy</h2>
+        <form @submit.prevent="createPolicy" class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm mb-1">Name</label>
+            <input v-model.trim="form.name" required class="input" placeholder="Remote Work Guidelines" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Type</label>
+            <select v-model="form.type" required class="input">
+              <option disabled value="">Select type</option>
+              <option value="hr">HR</option>
+              <option value="it">IT</option>
+              <option value="leave">Leave</option>
+              <option value="customer">Customer</option>
+            </select>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-sm mb-1">Description</label>
+            <textarea v-model.trim="form.description" required class="input" rows="3" placeholder="Short description..."></textarea>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Effective Date</label>
+            <input v-model="form.effective_date" type="datetime-local" required class="input" />
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Document (optional)</label>
+            <input ref="fileCreate" type="file" class="input" />
+          </div>
+          <div class="sm:col-span-2 flex gap-2 justify-end">
+            <button type="button" @click="resetCreate" class="btn-secondary">Reset</button>
+            <button type="submit" class="btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Filters + list -->
+      <div class="bg-white rounded-2xl shadow p-5">
+        <div class="flex flex-col sm:flex-row gap-3 sm:items-end sm:justify-between mb-4">
+          <div class="flex gap-2 items-end">
+            <div>
+              <label class="block text-sm mb-1">Search</label>
+              <input v-model.trim="filters.search" @keyup.enter="loadPolicies" class="input" placeholder="Search name/description" />
+            </div>
+            <div>
+              <label class="block text-sm mb-1">Type</label>
+              <select v-model="filters.type" class="input">
+                <option value="">All</option>
+                <option value="hr">HR</option>
+                <option value="it">IT</option>
+                <option value="leave">Leave</option>
+                <option value="customer">Customer</option>
+              </select>
+            </div>
+            <button @click="loadPolicies" class="btn-primary">Search</button>
+          </div>
+          <div class="text-sm text-gray-500">Total: {{ total }}</div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="text-left border-b">
+                <th class="py-2 pr-3">ID</th>
+                <th class="py-2 pr-3">Name</th>
+                <th class="py-2 pr-3">Type</th>
+                <th class="py-2 pr-3">Effective</th>
+                <th class="py-2 pr-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in policies" :key="p.id" class="border-b last:border-0">
+                <td class="py-2 pr-3">{{ p.id }}</td>
+                <td class="py-2 pr-3 font-medium">{{ p.name }}</td>
+                <td class="py-2 pr-3 uppercase">{{ p.type }}</td>
+                <td class="py-2 pr-3">{{ fmtDate(p.effective_date) }}</td>
+                <td class="py-2 pr-3 flex gap-2">
+                  <button class="btn-secondary" @click="openEdit(p)">Edit</button>
+                  <button class="btn-danger" @click="delPolicy(p.id)">Delete</button>
+                  <button class="btn-secondary" v-if="p.download_url || p.document_path" @click="download(p)">Download</button>
+                </td>
+              </tr>
+              <tr v-if="!policies.length">
+                <td colspan="5" class="py-6 text-center text-gray-500">No policies found</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="mt-4 flex items-center gap-3">
+          <button class="btn-secondary" :disabled="skip===0" @click="prevPage">Prev</button>
+          <div class="text-sm">Showing {{ skip+1 }}–{{ Math.min(skip+limit, total) }} of {{ total }}</div>
+          <button class="btn-secondary" :disabled="skip+limit>=total" @click="nextPage">Next</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ASSISTANT CHAT TAB -->
+    <section v-show="tab==='assistantChat'" class="bg-white rounded-2xl shadow p-5 space-y-4">
+      <h2 class="text-lg font-semibold">Assistant Chat</h2>
+      <div class="flex flex-col sm:flex-row gap-3 sm:items-end">
+        <div class="flex-1">
+          <label class="block text-sm mb-1">Message</label>
+          <input v-model.trim="chat.message" @keyup.enter="sendChat" class="input" placeholder="Ask about a policy..." />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Filter by type</label>
+          <select v-model="chat.type" class="input">
+            <option value="">(none)</option>
+            <option value="hr">HR</option>
+            <option value="it">IT</option>
+            <option value="leave">Leave</option>
+            <option value="customer">Customer</option>
+          </select>
+        </div>
+        <button class="btn-primary" @click="sendChat">Send</button>
+      </div>
+      <div v-if="chat.loading" class="text-sm text-gray-500">Thinking…</div>
+      <div v-if="chat.response" class="prose max-w-none">
+        <h3 class="font-semibold">Response</h3>
+        <div class="whitespace-pre-wrap">{{ chat.response }}</div>
+        <h4 class="mt-3 font-semibold">Relevant Policies</h4>
+        <ul class="list-disc ml-6" v-if="chat.relevant_policies?.length">
+          <li v-for="rp in chat.relevant_policies" :key="rp.id">
+            #{{ rp.id }} — {{ rp.name }} ({{ rp.type?.toUpperCase?.() || rp.type }})
+          </li>
+        </ul>
+        <div v-else class="text-sm text-gray-500">No specific documents matched.</div>
+        <div class="text-xs text-gray-400 mt-2">{{ chat.context_used }}</div>
+      </div>
+    </section>
+
+    <!-- ASSISTANT SEARCH TAB (GET /assistant/policies) -->
+    <section v-show="tab==='assistantSearch'" class="bg-white rounded-2xl shadow p-5 space-y-4">
+      <h2 class="text-lg font-semibold">Assistant Search by Keyword</h2>
+      <div class="flex gap-3 items-end">
+        <div class="flex-1">
+          <label class="block text-sm mb-1">Query</label>
+          <input v-model.trim="assistantQuery" @keyup.enter="assistantSearch" class="input" placeholder="e.g., IT Resources" />
+        </div>
+        <button class="btn-primary" @click="assistantSearch">Search</button>
+      </div>
+      <div v-if="assistantLoading" class="text-sm text-gray-500">Searching…</div>
+      <div v-if="assistantResults.length" class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left border-b">
+              <th class="py-2 pr-3">ID</th>
+              <th class="py-2 pr-3">Name</th>
+              <th class="py-2 pr-3">Type</th>
+              <th class="py-2 pr-3">Effective</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in assistantResults" :key="p.id" class="border-b last:border-0">
+              <td class="py-2 pr-3">{{ p.id }}</td>
+              <td class="py-2 pr-3 font-medium">{{ p.name }}</td>
+              <td class="py-2 pr-3 uppercase">{{ p.type }}</td>
+              <td class="py-2 pr-3">{{ fmtDate(p.effective_date) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else-if="assistantQueried" class="text-sm text-gray-500">No matches.</div>
+    </section>
+
+    <!-- EDIT MODAL -->
+    <div v-if="edit.show" class="fixed inset-0 modal flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-xl">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold">Edit Policy #{{ edit.data?.id }}</h3>
+          <button class="text-gray-500 hover:text-gray-800" @click="edit.show=false">✕</button>
+        </div>
+        <form @submit.prevent="saveEdit">
+          <div class="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm mb-1">Name</label>
+              <input v-model.trim="edit.form.name" class="input" />
+            </div>
+            <div>
+              <label class="block text-sm mb-1">Type</label>
+              <select v-model="edit.form.type" class="input">
+                <option value="">(no change)</option>
+                <option value="hr">HR</option>
+                <option value="it">IT</option>
+                <option value="leave">Leave</option>
+                <option value="customer">Customer</option>
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-sm mb-1">Description</label>
+              <textarea v-model.trim="edit.form.description" class="input" rows="3"></textarea>
+            </div>
+            <div>
+              <label class="block text-sm mb-1">Effective Date</label>
+              <input v-model="edit.form.effective_date" type="datetime-local" class="input" />
+            </div>
+            <div>
+              <label class="block text-sm mb-1">Replace Document</label>
+              <input ref="fileEdit" type="file" class="input" />
+            </div>
+          </div>
+          <div class="mt-4 flex gap-2 justify-end">
+            <button type="button" class="btn-secondary" @click="edit.show=false">Cancel</button>
+            <button type="submit" class="btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp } = Vue
+
+    createApp({
+      data() {
+        return {
+          apiBase: 'http://127.0.0.1:8000/api/v1',
+          tab: 'policies',
+
+          // Create form
+          form: { name: '', type: '', description: '', effective_date: '' },
+
+          // List
+          filters: { search: '', type: '' },
+          policies: [],
+          total: 0,
+          skip: 0,
+          limit: 10,
+
+          // Edit modal
+          edit: { show: false, data: null, form: { name: '', type: '', description: '', effective_date: '' } },
+
+          // Assistant Chat
+          chat: { message: '', type: '', loading: false, response: '', relevant_policies: [], context_used: '' },
+
+          // Assistant Search
+          assistantQuery: '',
+          assistantResults: [],
+          assistantLoading: false,
+          assistantQueried: false,
+
+          // Toast
+          toast: { show: false, ok: true, msg: '' },
+        }
+      },
+      mounted() {
+        this.loadPolicies()
+      },
+      methods: {
+        tabBtn(id) {
+          return `px-4 py-2 rounded-xl border ${this.tab===id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-800 border-gray-200 hover:border-blue-300'}`
+        },
+        showToast(msg, ok=true) {
+          this.toast = { show: true, ok, msg }
+          setTimeout(() => (this.toast.show = false), 3000)
+        },
+        fmtDate(d) {
+          if (!d) return '-'
+          const dt = new Date(d)
+          return dt.toLocaleString()
+        },
+
+        // ---------- CRUD -----------
+        async loadPolicies() {
+          try {
+            const params = new URLSearchParams()
+            if (this.filters.search) params.set('search', this.filters.search)
+            if (this.filters.type) params.set('policy_type', this.filters.type)
+            params.set('skip', this.skip)
+            params.set('limit', this.limit)
+
+            const url = `${this.apiBase}/policies?${params.toString()}`
+            const { data } = await axios.get(url)
+            // If your backend returns array only, we infer total from length
+            if (Array.isArray(data)) {
+              this.policies = data
+              this.total = Math.max(this.total, data.length) // best effort
+            } else {
+              // If your backend returns {items, total}
+              this.policies = data.items || data
+              this.total = data.total ?? (Array.isArray(data) ? data.length : this.policies.length)
+            }
+          } catch (e) {
+            console.error(e)
+            this.showToast('Failed to load policies', false)
+          }
+        },
+        prevPage() {
+          this.skip = Math.max(0, this.skip - this.limit)
+          this.loadPolicies()
+        },
+        nextPage() {
+          this.skip = this.skip + this.limit
+          this.loadPolicies()
+        },
+        resetCreate() {
+          this.form = { name: '', type: '', description: '', effective_date: '' }
+          if (this.$refs.fileCreate) this.$refs.fileCreate.value = ''
+        },
+        async createPolicy() {
+          try {
+            const fd = new FormData()
+            fd.append('name', this.form.name)
+            fd.append('type', this.form.type)
+            fd.append('description', this.form.description)
+            fd.append('effective_date', this.form.effective_date)
+            const f = this.$refs.fileCreate?.files?.[0]
+            if (f) fd.append('file', f)
+            // Do NOT set Content-Type; let Axios set the multipart boundary
+            await axios.post(`${this.apiBase}/policies/`, fd)
+            this.showToast('Policy created')
+            this.resetCreate()
+            this.loadPolicies()
+          } catch (e) {
+            console.error(e)
+            this.showToast('Create failed', false)
+          }
+        },
+        openEdit(p) {
+          this.edit.data = p
+          this.edit.form = {
+            name: '',
+            type: '',
+            description: '',
+            effective_date: ''
+          }
+          this.edit.show = true
+          if (this.$refs.fileEdit) this.$refs.fileEdit.value = ''
+        },
+        async saveEdit() {
+          try {
+            const id = this.edit.data.id
+            const fd = new FormData()
+            // Only append fields that user actually filled (partial update)
+            if (this.edit.form.name) fd.append('name', this.edit.form.name)
+            if (this.edit.form.type) fd.append('type', this.edit.form.type)
+            if (this.edit.form.description) fd.append('description', this.edit.form.description)
+            if (this.edit.form.effective_date) fd.append('effective_date', this.edit.form.effective_date)
+            const f = this.$refs.fileEdit?.files?.[0]
+            if (f) fd.append('file', f)
+            await axios.put(`${this.apiBase}/policies/${id}`, fd)
+            this.showToast('Policy updated')
+            this.edit.show = false
+            this.loadPolicies()
+          } catch (e) {
+            console.error(e)
+            this.showToast('Update failed', false)
+          }
+        },
+        async delPolicy(id) {
+          if (!confirm(`Delete policy #${id}?`)) return
+          try {
+            await axios.delete(`${this.apiBase}/policies/${id}`)
+            this.showToast('Policy deleted')
+            this.loadPolicies()
+          } catch (e) {
+            console.error(e)
+            this.showToast('Delete failed', false)
+          }
+        },
+        download(p) {
+          const url = p.download_url || `${this.apiBase}/policies/${p.id}/download`
+          window.open(url, '_blank')
+        },
+
+        // -------- Assistant Chat ---------
+        async sendChat() {
+          if (!this.chat.message) return
+          try {
+            this.chat.loading = true
+            this.chat.response = ''
+            const params = new URLSearchParams()
+            if (this.chat.type) params.set('policy_type', this.chat.type)
+            const url = `${this.apiBase}/assistant/chat${params.toString() ? ('?' + params.toString()) : ''}`
+            const { data } = await axios.post(url, { message: this.chat.message })
+            this.chat.response = data.response
+            this.chat.relevant_policies = data.relevant_policies || []
+            this.chat.context_used = data.context_used || ''
+          } catch (e) {
+            console.error(e)
+            this.showToast('Assistant chat failed', false)
+          } finally {
+            this.chat.loading = false
+          }
+        },
+
+        // -------- Assistant Search (/assistant/policies) ---------
+        async assistantSearch() {
+          this.assistantQueried = true
+          if (!this.assistantQuery) { this.assistantResults = []; return }
+          try {
+            this.assistantLoading = true
+            const { data } = await axios.get(`${this.apiBase}/assistant/policies`, {
+              params: { query: this.assistantQuery }
+            })
+            this.assistantResults = data.results || []
+          } catch (e) {
+            console.error(e)
+            this.showToast('Assistant search failed', false)
+          } finally {
+            this.assistantLoading = false
+          }
+        }
+      }
+    }).mount('#app')
+  </script>
+
+  <script>
+    // Tailwind component classes
+    document.querySelectorAll('.input').forEach(() => {})
+  </script>
+
+  <style>
+    /* Replaced Tailwind @apply (requires build step) with plain CSS so it works via CDN */
+    .input { width: 100%; border: 1px solid #d1d5db; border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; outline: none; box-shadow: none; transition: box-shadow .2s, border-color .2s; }
+    .input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(59,130,246,.25); }
+
+    .btn-primary { display: inline-flex; align-items: center; justify-content: center; padding: 0.5rem 1rem; border-radius: 0.75rem; background: #2563eb; color: #fff; font-size: 0.875rem; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    .btn-secondary { display: inline-flex; align-items: center; justify-content: center; padding: 0.5rem 1rem; border-radius: 0.75rem; background: #fff; font-size: 0.875rem; border: 1px solid #d1d5db; }
+    .btn-secondary:hover { border-color: #60a5fa; }
+
+    .btn-danger { display: inline-flex; align-items: center; justify-content: center; padding: 0.5rem 1rem; border-radius: 0.75rem; background: #dc2626; color: #fff; font-size: 0.875rem; }
+    .btn-danger:hover { background: #b91c1c; }
+  </style>
+</body>
+</html>
