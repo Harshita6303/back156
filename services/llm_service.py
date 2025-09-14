@@ -3,7 +3,10 @@ from __future__ import annotations
 import os, asyncio
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional   
-
+import PyPDF2
+from io import BytesIO
+import logging
+logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 import google.generativeai as genai
 
@@ -76,3 +79,30 @@ class LLMService:
         relevant_metadata: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         return await asyncio.to_thread(self._answer_sync, user_prompt, context_data)
+    
+    def chunk_pdf_content(self, pdf_content: bytes, chunk_size: int = 1000) -> List[str]:
+        """Extract and chunk PDF content"""
+        try:
+            chunks = []
+            pdf_file = BytesIO(pdf_content)
+            reader = PyPDF2.PdfReader(pdf_file)
+            
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    # Split text into chunks
+                    words = text.split()
+                    for i in range(0, len(words), chunk_size):
+                        chunk = " ".join(words[i:i + chunk_size])
+                        chunks.append(chunk)
+            
+            return chunks
+        except Exception as e:
+            logger.error(f"Error chunking PDF: {str(e)}")
+            return []
+        
+    async def generate_embedding(self, text: str) -> EmbeddingResult:
+        """Generate embedding for text (alias for generate_query_embedding)"""
+        return await self.generate_query_embedding(text)
+
+
