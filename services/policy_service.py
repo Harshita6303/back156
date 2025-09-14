@@ -4,6 +4,8 @@ from fastapi import UploadFile, HTTPException
 import os
 import logging
 from datetime import datetime
+from models.policy_models import PolicyType
+
 
 from models.policy_models import PolicyCreate, PolicyUpdate
 from database.database import SessionLocal, Policy as DBPolicy  # ✅ Use SQLAlchemy model
@@ -120,7 +122,11 @@ class PolicyService:
         try:
             query = db.query(DBPolicy)
             if policy_type:
-                query = query.filter(DBPolicy.type == policy_type)
+    # normalize incoming filter to the enum value (e.g., "hr")
+             normalized = PolicyType(policy_type.lower()).value if isinstance(policy_type, str) else policy_type.value
+             query = query.filter(DBPolicy.type == normalized)
+
+            
             if search:
                 query = query.filter(
                     DBPolicy.name.contains(search) | DBPolicy.description.contains(search)
