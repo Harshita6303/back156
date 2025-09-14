@@ -54,12 +54,16 @@ class VectorDBService:
                 logger.warning("Vector database not available, skipping document addition")
                 return False
 
+            # ✅ Normalize metadata.policy_type once up-front (case/trim safe)
+            base_meta = dict(metadata or {})
+            base_meta["policy_type"] = str(base_meta.get("policy_type", "")).strip().lower()
+
             chunk_ids = [f"policy_{policy_id}_chunk_{i}" for i in range(len(document_chunks))]
 
             chunk_metadata = []
             for i, chunk in enumerate(document_chunks):
                 chunk_meta = {
-                    **metadata,
+                    **base_meta,  # ✅ normalized policy_type included on every chunk
                     "policy_id": policy_id,
                     "chunk_index": i,
                     "total_chunks": len(document_chunks)
@@ -100,9 +104,19 @@ class VectorDBService:
                     "total_results": 0
                 }
 
-            where_clause = {}
+            # Validate embedding dimensions
+            if not query_embedding or len(query_embedding) != 768:  # Gemini embedding dimension
+                logger.warning(f"Invalid embedding dimension: {len(query_embedding) if query_embedding else 'None'}")
+                return {
+                    "documents": [],
+                    "metadatas": [],
+                    "distances": [],
+                    "total_results": 0
+                }
+
+            where_clause: Dict[str, Any] = {}
             if policy_type_filter:
-                where_clause["policy_type"] = policy_type_filter
+                where_clause["policy_type"] = str(policy_type_filter).strip().lower()
 
             results = self.collection.query(
                 query_embeddings=[query_embedding],
