@@ -154,7 +154,7 @@
         <div>
           <label class="block text-sm mb-1">Filter by type</label>
           <select v-model="chat.type" class="input">
-            <option value="">(none)</option>
+            <option value="all">ALL</option>
             <option value="hr">HR</option>
             <option value="it">IT</option>
             <option value="leave">Leave</option>
@@ -414,24 +414,26 @@
 
         // -------- Assistant Chat ---------
         async sendChat() {
-          if (!this.chat.message) return
-          try {
-            this.chat.loading = true
-            this.chat.response = ''
-            const params = new URLSearchParams()
-            if (this.chat.type) params.set('policy_type', this.chat.type)
-            const url = `${this.apiBase}/assistant/chat${params.toString() ? ('?' + params.toString()) : ''}`
-            const { data } = await axios.post(url, { message: this.chat.message })
-            this.chat.response = data.response
-            this.chat.relevant_policies = data.relevant_policies || []
-            this.chat.context_used = data.context_used || ''
-          } catch (e) {
-            console.error(e)
-            this.showToast('Assistant chat failed', false)
-          } finally {
-            this.chat.loading = false
-          }
-        },
+        if (!this.chat.message) return
+        try {
+         this.chat.loading = true
+         this.chat.response = ''
+         const params = new URLSearchParams()
+    // Always include type, default to 'all'
+         params.set('policy_type', this.chat.type || 'all')
+         const url = `${this.apiBase}/assistant/chat?${params.toString()}`
+         const { data } = await axios.post(url, { message: this.chat.message })
+         this.chat.response = data.response
+        this.chat.relevant_policies = data.relevant_policies || []
+         this.chat.context_used = data.context_used || ''
+         } catch (e) {
+         console.error(e)
+         this.showToast('Assistant chat failed', false)
+        } finally {
+        this.chat.loading = false
+  }
+}
+,
 
         // -------- Assistant Search (/assistant/policies) ---------
         async assistantSearch() {
